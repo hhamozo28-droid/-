@@ -1,0 +1,149 @@
+// =============================================================================
+// Dourousi Database Schema (Prisma + PostgreSQL)
+// Tailored to Professor Hamza Chouaib's M9-1 Lesson Plans (Word + PDF in ZIP)
+// Strict Privacy: Phone numbers stored ONLY as HMAC-SHA256 hashes (Algeria +213)
+// Strict DRM: Cloud storage keys & upstream Gofile URLs are private on server
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OtpPurpose {
+  LOGIN
+  CHANGE_PHONE
+}
+
+enum DevicePlatform {
+  android
+  ios
+}
+
+enum MaterialFileType {
+  pdf
+  docx
+  zip
+}
+
+enum NotificationType {
+  NEW_MATERIAL
+  MATERIAL_UPDATED
+  SYSTEM
+}
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  phoneHash     String    @unique @map("phone_hash") @db.VarChar(64)
+  phoneMasked   String    @map("phone_masked") @db.VarChar(24)
+  preferredLang String    @default("ar") @map("preferred_lang") @db.VarChar(5)
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sessions      Session[]
+
+  @@index([phoneHash])
+  @@map("users")
+}
+
+model OtpChallenge {
+  id            String     @id @default(uuid()) @db.Uuid
+  phoneHash     String     @map("phone_hash") @db.VarChar(64)
+  phoneMasked   String     @map("phone_masked") @db.VarChar(24)
+  otpHash       String     @map("otp_hash") @db.VarChar(64)
+  purpose       OtpPurpose @default(LOGIN)
+  targetUserId  String?    @map("target_user_id") @db.Uuid
+  attempts      Int        @default(0) @db.SmallInt
+  expiresAt     DateTime   @map("expires_at") @db.Timestamptz(6)
+  consumedAt    DateTime?  @map("consumed_at") @db.Timestamptz(6)
+  requestIp     String?    @map("request_ip") @db.VarChar(45)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([phoneHash, purpose, createdAt])
+  @@map("otp_challenges")
+}
+
+model Session {
+  id               String         @id @default(uuid()) @db.Uuid
+  userId           String         @map("user_id") @db.Uuid
+  refreshTokenHash String         @unique @map("refresh_token_hash") @db.VarChar(64)
+  fcmToken         String?        @map("fcm_token") @db.Text
+  devicePlatform   DevicePlatform @default(android) @map("device_platform")
+  expiresAt        DateTime       @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime?      @map("revoked_at") @db.Timestamptz(6)
+  lastUsedAt       DateTime       @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([fcmToken])
+  @@map("sessions")
+}
+
+model Category {
+  id         String     @id @default(uuid()) @db.Uuid
+  prefixCode String     @unique @map("prefix_code") @db.VarChar(10)
+  nameAr     String     @map("name_ar") @db.VarChar(150)
+  nameFr     String     @map("name_fr") @db.VarChar(150)
+  nameEn     String     @map("name_en") @db.VarChar(150)
+  sortOrder  Int        @default(0) @map("sort_order")
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  materials  Material[]
+
+  @@map("categories")
+}
+
+model Material {
+  id             String           @id @default(uuid()) @db.Uuid
+  categoryId     String           @map("category_id") @db.Uuid
+  code           String           @unique @db.VarChar(20)
+  title          String           @db.VarChar(255)
+  contentLabel   String           @default("مخططات الدروس (نموذج M9-1 — Word + PDF)") @map("content_label") @db.VarChar(150)
+  unitsCount     Int              @default(1) @map("units_count")
+  lessonsCount   Int              @map("lessons_count")
+  filesCount     Int              @default(1) @map("files_count")
+  pagesTotal     Int              @default(1) @map("pages_total")
+  sizeBytes      BigInt           @map("size_bytes")
+  catalogSizeMb  Float            @default(0) @map("catalog_size_mb")
+  fileType       MaterialFileType @default(zip) @map("file_type")
+  storageKey     String           @map("storage_key") @db.Text
+  sourceUrl      String?          @map("source_url") @db.Text
+  fileChecksum   String           @map("file_checksum") @db.VarChar(64)
+  version        Int              @default(1)
+  isActive       Boolean          @default(true) @map("is_active")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category       Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  notifications  Notification[]
+
+  @@index([code])
+  @@index([categoryId, isActive])
+  @@map("materials")
+}
+
+model Notification {
+  id         String           @id @default(uuid()) @db.Uuid
+  materialId String?          @map("material_id") @db.Uuid
+  type       NotificationType
+  titleAr    String           @map("title_ar") @db.VarChar(200)
+  titleFr    String           @map("title_fr") @db.VarChar(200)
+  titleEn    String           @map("title_en") @db.VarChar(200)
+  bodyAr     String           @map("body_ar") @db.Text
+  bodyFr     String           @map("body_fr") @db.Text
+  bodyEn     String           @map("body_en") @db.Text
+  deepLink   String?          @map("deep_link") @db.VarChar(255)
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  material   Material?        @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@map("notifications")
+}
